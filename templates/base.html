@@ -14,6 +14,10 @@
       };
     </script>
     
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    {% block head_extra %} {% endblock %}
+
   </head>
   <body class="h-full bg-slate-900 text-slate-100">
     <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur">
@@ -47,6 +51,7 @@
 
     {% block body_end %}
     <!-- Any JS -->
+    <!-- <script src="https://cdn.jsdelivr.net/npm/chart.js" defer></script> -->
     {% endblock %}
   </body>
 </html>

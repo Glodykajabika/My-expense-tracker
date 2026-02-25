@@ -5,22 +5,17 @@ from flask import (
     url_for, 
     make_response, 
     flash,
-    redirect
+    redirect, 
+    Response
     )
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func
 
 from datetime import date, datetime
-    
-def format_number(value):
-    """Format a number with a commas as thousands separators and floats to 2 decimals"""
-    
-    return f"{value:,.2f}"
+
 
 app = Flask(__name__)
-
-app.jinja_env.filters["format_number"] = format_number
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///expenses.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
@@ -40,7 +35,34 @@ with app.app_context():
     db.create_all()
 
 CATEGORIES = ["Food", "Transport", "Rent", "Utilities", "Health", "Others"]
+    
+def format_number(value):
+    """Format a number with a commas as thousands separators and floats to 2 decimals"""
+    
+    return f"{value:,.2f}"
 
+app.jinja_env.filters["format_number"] = format_number
+
+
+def expense_filter(query, expense_to_filter, op, applied_filter):
+    """
+    Filter expenses, either by start date, end date, or category.
+    query = query,
+    expense_to_filter = the list of expenses you want to perfom the filtering on
+    op = comparison operators (>= or <= or ==) 
+    applied_filter = the filter to apply (start_date or end_date or category)
+    """
+    
+    if op == ">=":
+        return query.filter(expense_to_filter >= applied_filter)
+    
+    elif op == "<=":
+        return query.filter(expense_to_filter <= applied_filter)
+    
+    elif op == "==":
+        return query.filter(expense_to_filter == applied_filter)
+    
+    
 def parse_date_or_none(s: str):
     if not s:
         return None
@@ -69,36 +91,42 @@ def index():
         start_str = end_str = ""
         
     q = Expense.query
+    
+    # category query for  pie chart
     category_query = db.session.query(Expense.category, func.sum(Expense.amount))
     
-    # A function to help filter expenses, either by start date, end date, or category
-    def expense_filter(query, expense_to_filter, op, applied_filter):
-        if op == ">=":
-            return query.filter(expense_to_filter >= applied_filter)
-        
-        elif op == "<=":
-            return query.filter(expense_to_filter <= applied_filter)
-        
-        elif op == "==":
-            return query.filter(expense_to_filter == applied_filter)
-    
+    # date query for  day chart
+    day_query = db.session.query(Expense.date, func.sum(Expense.amount))
     
     if start_date:
         q = expense_filter(q, Expense.date, ">=", start_date)
         category_query = expense_filter(category_query, Expense.date, ">=", start_date)
+        day_query = expense_filter(day_query, Expense.date, ">=", start_date)
         
     if end_date:
         q = expense_filter(q, Expense.date, "<=", end_date)
-        category_query = expense_filter(category_query, Expense.date, "<=", end_date)
+        # category_query = expense_filter(category_query, Expense.date, "<=", end_date)
+        # day_query = expense_filter(day_query, Expense.date, "<=", end_date)
         
     if selected_category:
         q = expense_filter(q, Expense.category, "==", selected_category)
-        category_query = expense_filter(category_query, Expense.category, "==", selected_category)
+        # category_query = expense_filter(category_query, Expense.category, "==", selected_category)
+        # day_query = expense_filter(day_query, Expense.category, "==", selected_category)
         
         
         
     expenses = Expense.query.order_by(Expense.date.desc(), Expense.id.desc()).all()
-    category_row = category_query.group_by(Expense.category).all()
+    
+    # For pie chart
+    category_rows = category_query.group_by(Expense.category).all() # type: ignore #! To ignore the warning from pylint
+    category_labels = [c for c, _ in category_rows]
+    category_amounts = [round(float(a or 0), 2) for _, a in category_rows]
+    
+    # For day chart
+    day_rows = day_query.group_by(Expense.date).order_by(Expense.date).all() # type: ignore #! To ignore the warning from pylint
+    day_labels = [d.isoformat() for d, _ in day_rows]
+    day_amounts = [round(float(a or 0), 2) for _, a in day_rows]
+    
     
     total = round(sum(e.amount for e in expenses), 2)
     
@@ -121,7 +149,11 @@ def index():
         total=total,
         start_str=start_str,
         end_str=end_str,
-        selected_category=selected_category
+        selected_category=selected_category,
+        category_labels=category_labels,
+        category_amounts=category_amounts, 
+        day_labels=day_labels,
+        day_amounts=day_amounts
     )
 
 @app.route("/add", methods=['POST'])
@@ -170,6 +202,49 @@ def delete(expense_id):
     flash("Expense deleted", "success")
     
     return redirect(url_for("index"))
+
+@app.route("/export.csv")
+def export_csv():
+    # Reading parameters (Filtering by date)
+    start_str = (request.args.get("start") or "").strip()
+    end_str = (request.args.get("end") or "").strip()
+    selected_category = (request.args.get("category") or "").strip()
+    
+    # Parsing (Filtering by date)
+    start_date = parse_date_or_none(start_str)
+    end_date = parse_date_or_none(end_str)
+    
+    q = Expense.query
+    
+    if start_date:
+        q = expense_filter(q, Expense.date, ">=", start_date)
+        
+    if end_date:
+        q = expense_filter(q, Expense.date, "<=", end_date)
+        
+    if selected_category:
+        q = expense_filter(q, Expense.category, "==", selected_category)
+        
+    expenses = q.order_by(Expense.date.desc(), Expense.id.desc()).all() # type: ignore
+    
+    lines = ["date, description, category, amount"]
+    
+    for e in expenses:
+        lines.append(f"{e.date}, {e.description}, {e.category}, {format_number(e.amount)}")
+        
+    csv_data = "\n".join(lines)
+    
+    filename_start = start_str or "all"
+    filename_end = end_str or "all"
+    filename = f"expenses_{filename_start}_to_{filename_end}.csv"
+    
+    return Response(
+        csv_data,
+        headers={
+            "Content-Type":"text/csv",
+            "Content-Disposition":f"attachment; filename={filename}"
+        }
+    )
     
 if __name__ == "__main__":
     app.run(debug=True)
