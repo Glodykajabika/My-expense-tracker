@@ -165,7 +165,7 @@ def add():
     date_str = (request.form.get("date") or "").strip()
     
     if not description or not amount_str or not category:
-        flash("please fill description, amount, and category", "error")
+        flash("Please fill description, amount, and category", "error")
         
         return redirect(url_for("index"))
         
@@ -200,6 +200,56 @@ def delete(expense_id):
     db.session.delete(e)
     db.session.commit()
     flash("Expense deleted", "success")
+    
+    return redirect(url_for("index"))
+
+@app.route("/edit/<int:expense_id>", methods=["GET"])
+def edit(expense_id):
+    e = Expense.query.get_or_404(expense_id)
+    
+    return render_template(
+        "edit.html",
+        expense=e,
+        category=e.category,
+        categories=CATEGORIES,
+        today=date.today().isoformat()
+    )
+
+@app.route("/edit/<int:expense_id>", methods=["POST"])
+def edit_post(expense_id):
+    e = Expense.query.get_or_404(expense_id)
+    
+    description = (request.form.get("description" ) or "").strip()
+    amount_str = (request.form.get("amount" ) or "").strip()
+    category = (request.form.get("category" ) or "").strip()
+    date_str = (request.form.get("date" ) or "").strip()
+    
+    # if not description or amount_str or category:
+    #     flash("Please fill in description, amount, and category", "error")
+        
+    #     return redirect(url_for("edit", expense_id=expense_id))
+    
+    
+    try:
+        d = datetime.strptime(date_str, "%Y-%m-%d").date() if date_str else e.date
+        amount = float(amount_str)
+        
+        if amount <= 0:
+            raise ValueError
+        
+    except ValueError:
+        flash("Amount must be a positive number", "error")
+        
+        return redirect(url_for("edit", expense_id=expense_id))
+    
+    
+    e.description = description
+    e.amount = amount
+    e.category = category
+    e.date = d 
+    
+    db.session.commit()
+    flash("Expense updated", "success")
     
     return redirect(url_for("index"))
 
