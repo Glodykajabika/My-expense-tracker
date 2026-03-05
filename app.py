@@ -7,13 +7,20 @@ from flask import (
     flash,
     redirect, 
     Response
-    )
+)
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import func
 
 from datetime import date, datetime
+from dotenv import load_dotenv
+from openai import OpenAI
 
+import os
+
+
+load_dotenv()
+client = OpenAI(api_key=os.getenv(OPENAI_API_KEY))
 
 app = Flask(__name__)
 
